@@ -255,7 +255,7 @@ class ArenaClient:
     def handle_checkpoint_request(self, http: httpx.Client, event: dict) -> None:
         payload = event.get("payload") or {}
         checkpoint_id = payload.get("checkpoint_id")
-        if not checkpoint_id:
+        if not checkpoint_id or self.engine.run_id is None:
             self.storage.add_diagnostic(
                 "malformed_envelope",
                 {"reason": "checkpoint_without_id"},
@@ -400,7 +400,7 @@ class ArenaClient:
                     continue
 
                 raw = "\n".join(data_lines)
-                event_type, data_lines = None, []
+                frame_name, event_type, data_lines = event_type, None, []
 
                 try:
                     event = json.loads(raw)
@@ -419,7 +419,7 @@ class ArenaClient:
                 if not isinstance(event, dict):
                     continue
 
-                if self.dispatch(http, event):
+                if self.dispatch(http, event, frame_name):
                     return
 
                 if (
@@ -429,19 +429,28 @@ class ArenaClient:
                     self.flush(http)
                     last_flush = time.time()
 
-    def dispatch(self, http: httpx.Client, event: dict) -> bool:
-        """Handle one frame. Returns True when the stream must be reopened."""
-        kind = event.get("type")
+    def dispatch(
+        self,
+        http: httpx.Client,
+        event: dict,
+        frame_name: str | None = None,
+    ) -> bool:
+        """Handle one frame. Returns True when the stream must be reopened.
 
-        if kind == "stream_open":
+        Control frames are named by the SSE ``event:`` line and need not repeat
+        that name in their data, so both sources are consulted.
+        """
+        names = {name for name in (frame_name, event.get("type")) if name}
+
+        if "stream_open" in names:
             self.on_stream_open(http, event)
             return False
 
-        if kind == "stream_reset":
+        if "stream_reset" in names:
             self.on_stream_reset(http, event)
             return True
 
-        if kind == "stream_end":
+        if "stream_end" in names:
             self.on_stream_end(http)
             return True
 
@@ -449,20 +458,31 @@ class ArenaClient:
         if isinstance(offset, int) and not isinstance(offset, bool):
             self.cursor = max(self.cursor, offset + 1)
 
-        if kind == "checkpoint_request":
+        if "checkpoint_request" in names:
             self.handle_checkpoint_request(http, event)
             self.flush(http)
             return False
+
+        if self.engine.run_id is None:
+            # A ledger event before any stream_open: reopen rather than guess
+            # which run it belongs to.
+            log.warning("ledger event before stream_open; reconnecting")
+            self.storage.add_diagnostic(
+                "malformed_envelope", {"reason": "event_before_stream_open"}
+            )
+            return True
 
         self.engine.process_event(event)
         self.stats["events"] += 1
         return False
 
     def on_stream_open(self, http: httpx.Client, event: dict) -> None:
-        source = event if "run_id" in event else (event.get("payload") or {})
-        run_id = source.get("run_id") or (event.get("payload") or {}).get("run_id")
-        resumed_from = source.get("resumed_from")
-        next_event_in = source.get("next_event_in_seconds")
+        payload = event.get("payload") or {}
+        run_id = event.get("run_id") or payload.get("run_id")
+        resumed_from = event.get("resumed_from", payload.get("resumed_from"))
+        next_event_in = event.get(
+            "next_event_in_seconds", payload.get("next_event_in_seconds")
+        )
 
         if not run_id:
             log.error("stream_open carried no run id")
