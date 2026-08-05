@@ -1,106 +1,176 @@
-# Ledger Arena: starter kit
+# Valura Ledger Arena — double-entry ledger consumer
 
-You are building a double-entry book of record. We stream you a broker's event
-feed; you post the journal legs each event produces and answer state
-checkpoints. We score it continuously against a reference implementation.
+A single-process Python program that subscribes to the arena's event feed,
+keeps a double-entry book of record, submits the journal legs each event
+produced, and answers current and historical checkpoints.
 
-Every awkward case in here is one that has cost a real back office real money,
-and most of them still balanced perfectly while being wrong.
+There is no inbound server here. Nothing needs a public address, a domain, a
+certificate or a cloud account: the program makes outbound HTTPS requests to
+the arena and everything else is local.
 
-## Start here
+## Source of truth
 
-```bash
-git clone <your copy of this repo>
-cd ledger-arena-starter
-pip install -r requirements.txt
+The live protocol endpoint at `/protocol` is canonical. The `PROTOCOL.md` in
+this repository is the copy that shipped with the starter kit and may be stale;
+where the two disagree, believe the live task sheet and `/v1/rules`.
 
-python client.py --key ak_your_key_here
-```
-
-Get your key from **https://hiring-arena.twocc.in** by entering the email your
-invitation was sent to.
-
-That first run will connect, stream, and score somewhere in the low tens. It is
-meant to: `book.py` implements one event type as a worked example and raises on
-the rest. Seeing the whole loop work before you have written a line means any
-later failure is yours and not ours.
-
-It does not score zero because roughly one event in seven correctly produces no
-legs at all, and submitting nothing for those is the right answer. Treat the
-number you get on that first run as the floor, not as progress.
-
-It ends by printing what it could not post, which is your to-do list:
-
-```
-not implemented yet (1174 events skipped):
-  order_filled                     287 events
-  trade_settled                    281 events
-  ...
-```
-
-Then read **`PROTOCOL.md`**. It is the entire specification: the accounts, all
-twenty event types, every posting rule, and how the scoring works.
-
-## What is already done for you
-
-`client.py` is finished. It subscribes, survives the deliberate mid-run replay,
-resumes from an offset, batches postings, and answers checkpoints on time. That
-is transport, and it is not what we are assessing.
-
-`book.py` is where you work. It hands you one event and takes back its legs.
-
-## Two things to get right before anything else
-
-**Use `Decimal`, never `float`.** Money here does not always divide evenly. A
-float implementation will disagree with us by a cent in places that are very
-hard to find afterwards.
-
-**Key balances by `(customer, account)`, not by account.** At least one event
-moves money between two customers on the same account. An account-level book
-shows nothing wrong at all, and its trial balance agrees with it.
-
-## Tiers
-
-| Tier | Attempts | Score | What it is for |
-| --- | --- | --- | --- |
-| `practice` | unlimited | shown, with the correct legs on every event | develop here |
-| `submission` | 3 | shown | scored; tuning against it is expected |
-| `final` | 1 | withheld | this is what ranks you |
-
-Practice returns the expected legs on every response. Use it hard: it is the
-executable version of the specification, and anything ambiguous in the document
-is settled by running against it.
-
-Each attempt draws a fresh dataset, so a retry is a new problem rather than a
-retake of one you have already seen scored.
-
-## Rules
-
-- **One address, one candidate.** Your key is your identity.
-- **Use AI tools if you normally do.** We do. There is no penalty and no
-  detection game. But you will walk us through the code in a live session and
-  change it while we watch, so be able to defend every line of it.
-- **Ask in Discord, not by DM.** Anything clarified there becomes canon for
-  everyone, which is fairer than rewarding whoever thought to ask privately.
-- **If you run out of time, stop and write down what is missing** and how you
-  would have done it. That costs you nothing and reads far better than
-  something half-built and unexplained.
-
-## Things the stream will do to you
-
-All deliberate, all in `PROTOCOL.md`, none of them bugs: duplicate delivery, a
-forced disconnect that rewinds you several hundred events, fills that arrive
-before their placement, oversells, reversals of events you never received, and
-payloads that will not parse.
-
-A server that rejects one bad event and keeps consuming beats one that stops.
-
-## Running a graded tier
+## Setup
 
 ```bash
-python client.py --key ak_... --mode submission
+uv sync
+cp .env.example .env
 ```
 
-It will ask you to confirm, because attempts are limited. A run that cannot
-finish before the deadline is refused rather than started, so you will not lose
-an attempt to the clock.
+Then put your key in the local `.env`. It is the only place it should ever
+exist: `.env` is ignored by Git, never logged, and never written to SQLite.
+
+## Configuration
+
+| Variable | Meaning |
+| --- | --- |
+| `ARENA_BASE_URL` | Arena base URL. Must be `https://`. |
+| `ARENA_API_KEY` | Your key from the portal. Local only. |
+| `ARENA_DB_PATH` | SQLite file. Defaults to `data/ledger.sqlite3`. |
+| `ARENA_BATCH_SIZE` | Postings buffered before a flush is triggered (1–500). |
+| `ARENA_FLUSH_MS` | Milliseconds before an idle flush is triggered. |
+| `ARENA_MAX_SECONDS` | Local safety deadline. Defaults per mode. |
+| `ARENA_LOG_LEVEL` | Python log level. |
+
+Every one of these can be overridden on the command line (`--url`, `--db`,
+`--batch-size`, `--flush-ms`, `--max-seconds`, `--log-level`). Command line
+beats environment beats default.
+
+## Running
+
+Practice:
+
+```bash
+uv run python client.py --mode practice
+```
+
+Submission:
+
+```bash
+uv run python client.py --mode submission --new-run
+```
+
+Resume an interrupted submission — no `--new-run`, so a dropped connection can
+never spend a second attempt:
+
+```bash
+uv run python client.py --mode submission
+```
+
+Final:
+
+```bash
+uv run python client.py --mode final --new-run
+```
+
+Resume an interrupted final:
+
+```bash
+uv run python client.py --mode final
+```
+
+Status, which consumes no attempt:
+
+```bash
+uv run python client.py --status --mode practice
+uv run python client.py --status --mode submission
+uv run python client.py --status --mode final
+```
+
+Tests:
+
+```bash
+uv run pytest
+```
+
+Local database inspection, read-only:
+
+```bash
+uv run python scripts/inspect_db.py runs
+uv run python scripts/inspect_db.py events --run-id RUN_ID
+uv run python scripts/inspect_db.py outbox --run-id RUN_ID
+uv run python scripts/inspect_db.py rejections --run-id RUN_ID
+uv run python scripts/inspect_db.py diagnostics --run-id RUN_ID
+uv run python scripts/inspect_db.py event --run-id RUN_ID --event-id EVT_ID
+```
+
+## Architecture
+
+```
+arena SSE stream -> client.py -> engine.py -> storage.py (SQLite)
+                                           -> book.py    (in-memory projection)
+                                           -> posting outbox -> POST /v1/postings
+checkpoint_request -> current or as-of snapshot -> POST /v1/checkpoint
+```
+
+* **`client.py`** is transport only. It parses SSE frames, reconnects, drains
+  the outbox, and answers checkpoints. It holds no accounting state.
+* **`engine.py`** owns ordering, first-delivery-wins deduplication, atomic
+  persistence, and historical replay.
+* **`storage.py`** is the only module that executes SQL. It stores runs, the
+  first-seen body and content hash of every event, the legs and reversible
+  effect each produced, the posting and checkpoint outboxes, and diagnostics.
+* **`book.py`** is the ledger: chart of accounts, tariffs, handlers, the lot
+  book, and the checkpoint snapshot.
+
+`Book.prepare_event` validates and calculates without mutating anything;
+`Book.apply_stored_event` is the only mutating path and it works from what was
+persisted. That split is what makes a restart, a stream rewind, and an as-of
+query all reproduce exactly the book that was originally committed.
+
+## Accounting conventions
+
+* `Decimal` everywhere. No binary floating point touches money, a rate, a
+  quantity or a cost basis.
+* Money is rounded to the cent half away from zero, and every derived amount
+  (brokerage, custody, regulatory fee, broker cost, custody cost, partner
+  share) is rounded independently before use.
+* Balances are debit-positive: assets and expenses are normally positive,
+  liabilities and income normally negative.
+* Balances are keyed by `(customer_id, account)`, never by account alone. A
+  transfer between two customers lands on 2010 twice and would otherwise
+  vanish.
+* Revenue and cost are booked gross. The regulatory fee is a liability, not
+  income; broker cost includes the flat ticket fee; the partner share is zero
+  when cost exceeds revenue.
+* FIFO consumes lots in delivery order, not trade date. A partial consumption
+  relieves `round(lot_total × sold_qty / lot_qty)` and the remainder stays with
+  the lot.
+* Quantities are plain decimal strings with no exponent notation.
+
+## Recovery behaviour
+
+* The resume offset is durable. `runs.next_offset` advances inside the same
+  transaction that inserts an event and its outbox row, so the two can never
+  disagree.
+* On startup the book is rebuilt by replaying the run's committed events.
+* A redelivered `event_id` is ignored; a redelivered `event_id` with a
+  different body is recorded as a conflicting duplicate and the first body
+  stays canonical.
+* Postings live in a SQLite outbox and are acknowledged only after a 2xx, so
+  an HTTP failure or a crash resends rather than loses them. 429 responses
+  respect `Retry-After`.
+* A checkpoint payload is persisted before it is sent and reused verbatim on
+  retry, so a late answer still describes the checkpoint's place in the stream.
+* An interrupted scarce attempt is resumed by rerunning without `--new-run`.
+  The client refuses to send `new=true` while an unfinished local run exists.
+
+## Known limitations
+
+* Soft invariants (a fill whose principal disagrees with quantity × price, a
+  dividend whose gross minus tax disagrees with the net, an FX deposit whose
+  converted amounts disagree with amount × rate, a fill routed to a broker
+  other than the calculated route) are logged as diagnostics rather than
+  rejected. They are the candidates for the feed's systematic defect;
+  promoting one to a rejection is a decision practice feedback should make,
+  not a guess.
+* As-of checkpoints replay the run's stored events from the beginning rather
+  than from a periodic snapshot. At 6,000 events that is comfortably inside
+  the response window, so the snapshot optimisation is deliberately not built.
+* Stock splits keep the exact quotient of `quantity × ratio_to / ratio_from`
+  rather than quantizing to six decimal places, since the protocol states the
+  scaling rule but not a quantity rounding rule.

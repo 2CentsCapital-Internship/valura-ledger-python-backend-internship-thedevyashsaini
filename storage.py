@@ -445,6 +445,19 @@ class Storage:
                 ),
             )
 
+    def get_checkpoint_payload(self, run_id: str, checkpoint_id: str) -> dict | None:
+        """The payload as first computed, whatever its delivery status.
+
+        A retry must resend exactly this, never a snapshot recomputed after
+        later events have been applied.
+        """
+        row = self.connection.execute(
+            "SELECT payload_json FROM checkpoint_outbox"
+            " WHERE run_id = ? AND checkpoint_id = ?",
+            (run_id, checkpoint_id),
+        ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
     def get_pending_checkpoint(self, run_id: str, checkpoint_id: str) -> dict | None:
         row = self.connection.execute(
             "SELECT payload_json, status FROM checkpoint_outbox"
