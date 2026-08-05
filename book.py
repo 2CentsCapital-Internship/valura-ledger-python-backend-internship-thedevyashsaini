@@ -678,15 +678,22 @@ class Book:
         if spread < ZERO:
             raise RejectedEvent("negative_fx_spread", "fx spread is negative")
 
-        expected_market = money(amount_foreign * market_rate)
-        expected_customer = money(amount_foreign * customer_rate)
-        if expected_market != market_usd or expected_customer != customer_usd:
+        # The feed quotes rates as foreign units per USD, so the conversion is
+        # a division. Accept either direction rather than assume: the warning
+        # is for amounts no reading of the rate reproduces.
+        consistent = any(
+            money(convert(amount_foreign, market_rate)) == market_usd
+            and money(convert(amount_foreign, customer_rate)) == customer_usd
+            for convert in (lambda a, r: a / r, lambda a, r: a * r)
+        )
+        if not consistent:
             self._warn(
                 "fx_conversion_mismatch",
                 event_type=ev["type"],
-                expected_market=money_str(expected_market),
+                amount_foreign=str(amount_foreign),
+                market_rate=str(market_rate),
+                customer_rate=str(customer_rate),
                 actual_market=money_str(market_usd),
-                expected_customer=money_str(expected_customer),
                 actual_customer=money_str(customer_usd),
             )
 
