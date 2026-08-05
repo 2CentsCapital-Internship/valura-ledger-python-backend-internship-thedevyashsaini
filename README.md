@@ -171,6 +171,8 @@ query all reproduce exactly the book that was originally committed.
 * As-of checkpoints replay the run's stored events from the beginning rather
   than from a periodic snapshot. At 6,000 events that is comfortably inside
   the response window, so the snapshot optimisation is deliberately not built.
-* Stock splits keep the exact quotient of `quantity × ratio_to / ratio_from`
-  rather than quantizing to six decimal places, since the protocol states the
-  scaling rule but not a quantity rounding rule.
+* A split rounds each scaled lot to the six decimal places quantities carry,
+  half away from zero, rather than keeping the exact quotient. The protocol
+  states the scaling rule and the six-place limit but not the rounding rule
+  between them; rounding per lot is what keeps a position equal to the sum of
+  its lots.

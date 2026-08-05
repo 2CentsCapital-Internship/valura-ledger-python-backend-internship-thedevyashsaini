@@ -12,6 +12,7 @@ D = Decimal
 
 ZERO = D("0")
 CENT = D("0.01")
+SHARE = D("0.000001")
 BPS_DIVISOR = D("10000")
 
 
@@ -43,6 +44,16 @@ def quantity(value: str | int | Decimal) -> Decimal:
         raise ValueError("quantity cannot be negative")
 
     return result
+
+
+def share_quantity(value: str | int | Decimal) -> Decimal:
+    """Round a derived share count to the six places quantities carry.
+
+    Only a split produces a quantity the feed did not state, and a ratio like
+    2:3 applied to a fractional reinvestment lot runs past six places. Rounding
+    each lot keeps the position equal to the sum of its lots.
+    """
+    return decimal_value(value).quantize(SHARE, rounding=ROUND_HALF_UP)
 
 
 def quantity_str(value: Decimal) -> str:

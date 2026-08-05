@@ -123,6 +123,37 @@ def test_a_split_then_a_sale_relieves_the_scaled_lot_correctly(ledger):
     assert ledger.positions()["ACME"] == {"quantity": "15", "cost_basis": "90.00"}
 
 
+def test_a_split_rounds_a_fractional_lot_to_six_places(ledger):
+    ledger.deposit()
+    ledger.buy("trd-1", quantity="10", price="12.00", principal="120.00")
+    ledger.send(
+        "dividend_reinvested",
+        {
+            "customer_id": "CUST-1",
+            "symbol": "ACME",
+            "gross_amount": "13.65",
+            "withholding_tax": "3.41",
+            "net_amount": "10.24",
+            "reinvest_price": "320.57",
+            "reinvest_quantity": "0.031943",
+        },
+    )
+
+    ledger.send(
+        "stock_split",
+        {
+            "customer_id": "CUST-1",
+            "symbol": "ACME",
+            "ratio_from": "2",
+            "ratio_to": "3",
+        },
+    )
+
+    # 0.031943 x 3 / 2 is 0.0479145, which carries seven places.
+    assert [lot.quantity for lot in ledger.lots()] == [D("15"), D("0.047915")]
+    assert ledger.positions()["ACME"]["quantity"] == "15.047915"
+
+
 def test_a_symbol_change_preserves_lot_order(ledger):
     ledger.deposit()
     ledger.buy("trd-1", symbol="OLD", quantity="4", price="10.00", principal="40.00")

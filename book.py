@@ -20,6 +20,7 @@ from decimal_utils import (
     money,
     money_str,
     quantity_str,
+    share_quantity,
 )
 from models import (
     FeeCharge,
@@ -1454,7 +1455,7 @@ class Book:
                 trade_id=lot.trade_id,
                 customer_id=lot.customer_id,
                 symbol=lot.symbol,
-                quantity=lot.quantity * ratio_to / ratio_from,
+                quantity=share_quantity(lot.quantity * ratio_to / ratio_from),
                 total_cost=lot.total_cost,
                 created_sequence=lot.created_sequence,
             )
