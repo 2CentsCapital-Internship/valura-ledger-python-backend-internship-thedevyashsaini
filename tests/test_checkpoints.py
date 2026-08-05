@@ -86,19 +86,37 @@ def test_open_order_routes_hold_only_open_orders(ledger):
     assert ledger.snapshot()["open_order_routes"] == {"ord-open": "BRK-A"}
 
 
-def test_partial_fills_release_the_hold_without_accumulating_rounding(ledger):
-    # 14 * 196.29 + 8.00 = 2756.06, released across two partial fills. Rounding
-    # each release separately leaves 393.73; the hold owed on the 2 unfilled
-    # shares is 393.72.
+def test_a_partial_fill_releases_a_share_of_the_remaining_hold(ledger):
+    # 14 * 196.29 + 8.00 = 2756.06. Filling 10 leaves 787.45 against 4 shares,
+    # and filling 2 more releases half of that. Slicing the original hold
+    # instead would leave 393.73.
     ledger.deposit(amount="50000.00")
     ledger.place(order_id="ord-1", quantity="14", limit_price="196.29",
                  est_charges="8.00")
     ledger.buy("trd-1", quantity="10", price="373.75", principal="3737.50",
                final=False)
+
+    assert ledger.snapshot()["customers"]["CUST-1"]["cash_hold"] == "787.45"
+
     ledger.buy("trd-2", quantity="2", price="192.23", principal="384.46",
                final=False)
 
     assert ledger.snapshot()["customers"]["CUST-1"]["cash_hold"] == "393.72"
+
+
+def test_halving_fills_release_against_the_shrinking_hold(ledger):
+    # 5 * 26.63 + 1.00 = 134.15, filled 2.5 then 1.25. Releasing shares of the
+    # original hold would round to 33.54; releasing half of the 67.07 still
+    # held leaves 33.53.
+    ledger.deposit()
+    ledger.place(order_id="ord-1", symbol="FORT", quantity="5",
+                 limit_price="26.63", est_charges="1.00")
+    ledger.buy("trd-1", symbol="FORT", quantity="2.5", price="25.84",
+               principal="64.60", final=False)
+    ledger.buy("trd-2", symbol="FORT", quantity="1.25", price="26.08",
+               principal="32.60", final=False)
+
+    assert ledger.snapshot()["customers"]["CUST-1"]["cash_hold"] == "33.53"
 
 
 def test_a_closed_order_releases_its_whole_hold(ledger):

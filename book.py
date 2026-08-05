@@ -723,6 +723,7 @@ class Book:
     @staticmethod
     def _released(order: Order, fill_quantity: Decimal, final: bool) -> Order:
         result = Order.from_dict(order.to_dict())
+        unfilled = result.original_quantity - result.cumulative_fill_quantity
         result.cumulative_fill_quantity += fill_quantity
 
         if final:
@@ -731,24 +732,28 @@ class Book:
             result.status = "filled"
             return result
 
-        # Recompute the hold from the cumulative fill rather than subtracting a
-        # rounded release per fill. Subtraction accrues up to a cent of drift
-        # per partial fill, so an order filled in two parts would end up
-        # holding more than the same order filled in one.
-        if result.original_quantity > ZERO:
-            unfilled = max(
-                ZERO, result.original_quantity - result.cumulative_fill_quantity
+        # A partial fill releases its share of what is still held against what
+        # is still unfilled, rather than a slice of the original hold. The two
+        # agree on equal fills and diverge by a cent on unequal ones, and the
+        # arena's book rounds against the shrinking balance.
+        if unfilled > ZERO:
+            cash_release = money(
+                result.remaining_cash_hold * fill_quantity / unfilled
             )
-            result.remaining_cash_hold = money(
-                result.initial_cash_hold * unfilled / result.original_quantity
-            )
-            result.remaining_security_hold = (
-                result.initial_security_hold * unfilled / result.original_quantity
+            security_release = (
+                result.remaining_security_hold * fill_quantity / unfilled
             )
         else:
-            result.remaining_cash_hold = ZERO
-            result.remaining_security_hold = ZERO
+            cash_release = result.remaining_cash_hold
+            security_release = result.remaining_security_hold
 
+        cash_release = min(cash_release, result.remaining_cash_hold)
+        security_release = min(security_release, result.remaining_security_hold)
+
+        result.remaining_cash_hold = money(result.remaining_cash_hold - cash_release)
+        result.remaining_security_hold = (
+            result.remaining_security_hold - security_release
+        )
         return result
 
     def on_order_placed(self, p: dict, ev: dict, seq: int):
