@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from book import Book
 from models import StoredEvent
-from storage import Storage, content_hash
+from storage import Storage, event_content_hash
 
 CONTROL_EVENT_TYPES = {"stream_open", "stream_reset", "stream_end"}
 
@@ -85,7 +85,7 @@ class LedgerEngine:
             )
             return "malformed"
 
-        event_hash = content_hash(event)
+        event_hash = event_content_hash(event)
 
         existing = self.storage.get_event(run_id, event_id)
         if existing is not None:

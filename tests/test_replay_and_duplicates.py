@@ -68,6 +68,15 @@ def test_the_same_event_twice_changes_state_once(engine):
     assert len(engine.pending_postings()) == 1
 
 
+def test_a_redelivery_at_a_new_offset_is_not_a_conflict(engine):
+    engine.process_event(deposit(1, "evt_1"))
+
+    assert engine.process_event(deposit(9, "evt_1")) == "duplicate"
+
+    assert engine.counts["conflicting_duplicate"] == 0
+    assert engine.counts["duplicate"] == 1
+
+
 def test_a_conflicting_duplicate_does_not_replace_the_first_body(engine):
     engine.process_event(deposit(1, "evt_1", amount="100.00"))
 

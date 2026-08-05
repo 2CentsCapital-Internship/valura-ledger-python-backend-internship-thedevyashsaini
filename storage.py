@@ -159,6 +159,16 @@ def content_hash(value: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def event_content_hash(event: dict) -> str:
+    """Hash an event's content, excluding its delivery offset.
+
+    The feed redelivers the same ``event_id`` at a different offset, which is
+    transport metadata rather than a change of content. Including it would
+    report every redelivery as a conflicting duplicate and bury a real one.
+    """
+    return content_hash({k: v for k, v in event.items() if k != "offset"})
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
