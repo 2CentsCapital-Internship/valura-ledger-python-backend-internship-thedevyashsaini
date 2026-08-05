@@ -78,6 +78,22 @@ def test_reversing_a_final_fill_leaves_the_order_closed(ledger):
     assert snapshot["customers"]["CUST-1"]["cash_hold"] == "0.00"
 
 
+def test_a_reversed_fill_does_not_free_its_trade_id(ledger):
+    ledger.deposit()
+    ledger.buy("trd-1", quantity="10", price="12.00", principal="120.00",
+               event_id="evt_fill")
+    ledger.reverse("evt_fill")
+    assert ledger.positions() == {}
+
+    # The feed re-issues the same fill under a fresh event_id. The trade id is
+    # spent, so this is the duplicate rather than a new trade.
+    repeat = ledger.buy("trd-1", quantity="10", price="12.00", principal="120.00")
+
+    assert repeat.status == "rejected"
+    assert repeat.rejection_reason == "duplicate_trade"
+    assert ledger.positions() == {}
+
+
 def test_a_reversed_reinvested_dividend_removes_its_lot(ledger):
     ledger.deposit()
     ledger.buy("trd-1", quantity="10", price="12.00", principal="120.00")

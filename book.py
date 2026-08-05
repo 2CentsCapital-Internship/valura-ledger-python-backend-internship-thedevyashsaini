@@ -198,6 +198,10 @@ class Book:
         self.pending_order_lifecycle: dict[str, list[dict]] = defaultdict(list)
 
         self.trades: dict[str, Trade] = {}
+        # Trade ids are consumed permanently. A reversal undoes the postings
+        # and the lot book, not the fact that the feed already used the id, so
+        # a fill re-issued under a fresh event_id is still bad data.
+        self.trade_ids_ever_used: set[str] = set()
 
         self.lots: dict[tuple[str, str], list[Lot]] = defaultdict(list)
 
@@ -266,6 +270,10 @@ class Book:
                 self.trades.pop(key, None)
             else:
                 self.trades[key] = Trade.from_dict(value)
+
+        elif op_type == "claim_trade_id":
+            if value:
+                self.trade_ids_ever_used.add(key)
 
         elif op_type == "add_lot":
             bucket = (key["customer_id"], key["symbol"])
@@ -723,24 +731,24 @@ class Book:
             result.status = "filled"
             return result
 
+        # Recompute the hold from the cumulative fill rather than subtracting a
+        # rounded release per fill. Subtraction accrues up to a cent of drift
+        # per partial fill, so an order filled in two parts would end up
+        # holding more than the same order filled in one.
         if result.original_quantity > ZERO:
-            cash_release = money(
-                result.initial_cash_hold * fill_quantity / result.original_quantity
+            unfilled = max(
+                ZERO, result.original_quantity - result.cumulative_fill_quantity
             )
-            security_release = (
-                result.initial_security_hold * fill_quantity / result.original_quantity
+            result.remaining_cash_hold = money(
+                result.initial_cash_hold * unfilled / result.original_quantity
+            )
+            result.remaining_security_hold = (
+                result.initial_security_hold * unfilled / result.original_quantity
             )
         else:
-            cash_release = result.remaining_cash_hold
-            security_release = result.remaining_security_hold
+            result.remaining_cash_hold = ZERO
+            result.remaining_security_hold = ZERO
 
-        cash_release = min(cash_release, result.remaining_cash_hold)
-        security_release = min(security_release, result.remaining_security_hold)
-
-        result.remaining_cash_hold = money(result.remaining_cash_hold - cash_release)
-        result.remaining_security_hold = (
-            result.remaining_security_hold - security_release
-        )
         return result
 
     def on_order_placed(self, p: dict, ev: dict, seq: int):
@@ -1027,7 +1035,7 @@ class Book:
                 "broker_asset_class_mismatch",
                 f"{broker} does not trade {asset_class}",
             )
-        if trade_id in self.trades:
+        if trade_id in self.trade_ids_ever_used:
             raise RejectedEvent("duplicate_trade", "trade id already recorded")
 
         expected_principal = money(fill_quantity * price)
@@ -1066,6 +1074,13 @@ class Book:
             "before": None,
             "after": trade.to_dict(),
         }
+        claim_operation = {
+            "type": "claim_trade_id",
+            "key": trade_id,
+            "reversible": False,
+            "before": None,
+            "after": {"trade_id": trade_id},
+        }
         lifecycle_operation = self._lifecycle_operation(
             order_id, fill_quantity, final, seq
         )
@@ -1080,6 +1095,7 @@ class Book:
             )
 
         operations.append(trade_operation)
+        operations.append(claim_operation)
         operations.append(lifecycle_operation)
         return legs, {"operations": operations}
 

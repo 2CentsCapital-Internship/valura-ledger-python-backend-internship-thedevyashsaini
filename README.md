@@ -141,6 +141,12 @@ query all reproduce exactly the book that was originally committed.
   relieves `round(lot_total × sold_qty / lot_qty)` and the remainder stays with
   the lot.
 * Quantities are plain decimal strings with no exponent notation.
+* A partial fill's remaining hold is recomputed from the cumulative filled
+  quantity rather than by subtracting a rounded release each time, so an order
+  filled in several parts holds the same cash as one filled in a single part.
+* A trade id is spent for the life of the run. Reversing a fill undoes its
+  postings and its lots, but a later fill quoting the same trade id is still a
+  duplicate.
 
 ## Recovery behaviour
 
