@@ -712,23 +712,6 @@ class Book:
             ZERO,
         )
 
-    def _security_held_by_other_orders(
-        self,
-        customer_id: str,
-        symbol: str,
-        order_id: str,
-    ) -> Decimal:
-        total = ZERO
-        for order in self.orders.values():
-            if order.order_id == order_id:
-                continue
-            if order.customer_id != customer_id or order.symbol != symbol:
-                continue
-            if order.side != "sell" or order.status != "open":
-                continue
-            total += order.remaining_security_hold
-        return total
-
     @staticmethod
     def _released(order: Order, fill_quantity: Decimal, final: bool) -> Order:
         result = Order.from_dict(order.to_dict())
@@ -836,16 +819,9 @@ class Book:
                 "observed fills exceed the placed quantity",
             )
 
-        if side == "sell" and order.remaining_security_hold > ZERO:
-            available = self.position_quantity(
-                customer_id, symbol
-            ) - self._security_held_by_other_orders(customer_id, symbol, order_id)
-            if order.remaining_security_hold > available:
-                raise RejectedEvent(
-                    "insufficient_position",
-                    "sell hold exceeds the sellable position",
-                )
-
+        # A sell placement is not refused for exceeding the position. It moves
+        # no money and the reference keeps it open and routed; only the fill
+        # that would actually oversell is rejected.
         operations = [
             {
                 "type": "set_order",

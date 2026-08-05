@@ -161,6 +161,10 @@ query all reproduce exactly the book that was originally committed.
 
 ## Known limitations
 
+* A sell placement is accepted even when it reserves more than the customer
+  holds. An earlier build rejected those, and practice showed the reference
+  keeps them open and reports their route; only a fill that would actually
+  oversell is refused.
 * Soft invariants (a fill whose principal disagrees with quantity × price, a
   dividend whose gross minus tax disagrees with the net, an FX deposit whose
   converted amounts disagree with amount × rate, a fill routed to a broker

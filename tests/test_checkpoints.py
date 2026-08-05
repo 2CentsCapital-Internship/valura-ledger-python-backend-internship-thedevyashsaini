@@ -62,6 +62,17 @@ def test_a_sell_hold_does_not_count_as_cash_hold(ledger):
     assert ledger.snapshot()["customers"]["CUST-1"]["cash_hold"] == "0.00"
 
 
+def test_a_sell_placement_larger_than_the_position_still_opens_and_routes(ledger):
+    ledger.deposit()
+    ledger.buy("trd-1", quantity="2", price="12.00", principal="24.00")
+
+    placed = ledger.place(order_id="ord-big", side="sell", quantity="50",
+                          limit_price="15.00", asset_class="etf")
+
+    assert placed.status == "accepted"
+    assert ledger.snapshot()["open_order_routes"] == {"ord-big": "BRK-A"}
+
+
 def test_open_order_routes_hold_only_open_orders(ledger):
     ledger.deposit()
     ledger.place(order_id="ord-open", quantity="10", limit_price="12.00")
