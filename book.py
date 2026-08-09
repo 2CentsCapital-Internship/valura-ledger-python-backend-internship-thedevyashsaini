@@ -70,7 +70,7 @@ ALL_ACCOUNTS = {
     "5000", "5010", "5100",
 }
 
-REGULATORY_BPS = D("8")
+REGULATORY_BPS = D("10") # TASK 2
 
 TARIFFS: dict[str, dict] = {
     "BRK-A": {
@@ -163,6 +163,8 @@ def compute_fill_economics(
 
     custody = money(bps_raw(principal, tariff["custody_bps"]))
     regulatory = money(bps_raw(principal, REGULATORY_BPS))
+    
+    print(regulatory)
 
     broker_cost = money(
         bps_raw(principal, tariff["broker_cost_bps"]) + tariff["ticket_fee"]
@@ -238,6 +240,8 @@ class Book:
                 operation["type"],
                 value,
                 operation.get("key"),
+                
+                # reading operations here
             )
 
     def _apply_effect_operation(self, op_type: str, value, key) -> None:
@@ -514,6 +518,40 @@ class Book:
             ]
         }
         return legs, effect
+    
+    # TASK 7 - fee_rebate
+    def on_fee_rebate(self, p: dict, ev: dict, seq: int):
+        source_id = self._text(p, "refunds_source_id")
+        recipient = self._text(p, "to_customer_id")
+        # amount = self._positive_amount(p, "amount")
+        charge = self.fee_charges.get(source_id)
+
+        amount = charge.amount
+        
+        legs = [
+            JournalLeg(ACCOUNT_OMNIBUS_CASH, recipient, debit=amount),
+            JournalLeg(ACCOUNT_CUSTOMER_WALLET, recipient, credit=amount)
+        ]
+        
+        after = FeeCharge(
+            source_event_id=charge.source_event_id,
+            customer_id=charge.customer_id,
+            amount=charge.amount,
+            refunded=True,
+            reversed=charge.reversed,
+        )
+        effect = {
+            "operations": [
+                {
+                    "type": "set_fee_charge",
+                    "key": source_id,
+                    "reversible": True,
+                    "before": charge.to_dict(),
+                    "after": after.to_dict(),
+                }
+            ]
+        }
+        return legs, effect
 
     def on_fee_refund(self, p: dict, ev: dict, seq: int):
         source_id = self._text(p, "refunds_source_id")
@@ -656,6 +694,7 @@ class Book:
             JournalLeg(ACCOUNT_INTEREST_INCOME, customer_id, credit=firm_share),
         ]
         return legs, dict(NO_EFFECT)
+        
 
     def on_transfer_between_customers(self, p: dict, ev: dict, seq: int):
         sender = self._text(p, "from_customer_id")
@@ -782,6 +821,8 @@ class Book:
         route = choose_broker(asset_class, quantity, limit_price)
         estimated_principal = money(quantity * limit_price)
 
+        # customer_pnl = None
+
         if side == "buy":
             initial_cash_hold = money(estimated_principal + est_charges)
             initial_security_hold = ZERO
@@ -792,6 +833,8 @@ class Book:
         order = Order(
             order_id=order_id,
             customer_id=customer_id,
+            # store customer wise p&l
+            # customer_pnl=customer_pnl,
             side=side,
             symbol=symbol,
             asset_class=asset_class,
@@ -920,17 +963,24 @@ class Book:
         available = sum((lot.quantity for lot in lots), ZERO)
 
         if quantity_to_sell > available:
-            raise RejectedEvent(
-                "oversell",
-                "sale quantity exceeds the held position",
-            )
+            
+            quantity_to_sell = available # Task 4 - don't reject oversell instead set it to available quantity
+            # raise RejectedEvent(
+            #     "oversell",
+            #     "sale quantity exceeds the held position",
+            # )
 
         remaining = quantity_to_sell
         slices: list[FifoSlice] = []
         after_lots: list[Lot] = []
         total_cost = ZERO
 
+        reverse = []
+        
         for lot in lots:
+            reverse.append(lot)
+            
+        for lot in reverse: # TASK 3 - reverse the fifo list to make it lifo
             if remaining <= ZERO:
                 after_lots.append(
                     Lot(
@@ -1040,7 +1090,9 @@ class Book:
                 "broker_asset_class_mismatch",
                 f"{broker} does not trade {asset_class}",
             )
-        if trade_id in self.trade_ids_ever_used:
+            
+        # TASK 5 - reject duplicate trade
+        if trade_id in self.trade_ids_ever_used: 
             raise RejectedEvent("duplicate_trade", "trade id already recorded")
 
         expected_principal = money(fill_quantity * price)

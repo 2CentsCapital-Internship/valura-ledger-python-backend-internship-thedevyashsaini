@@ -105,7 +105,7 @@ class LedgerEngine:
                 )
             else:
                 self.counts["duplicate"] += 1
-            return "duplicate"
+            return "duplicate" # same event id diff hash
 
         problem = self._envelope_problem(event)
         if problem is not None:

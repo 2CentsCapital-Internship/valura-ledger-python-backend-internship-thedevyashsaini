@@ -419,6 +419,7 @@ class ArenaClient:
                 if not isinstance(event, dict):
                     continue
 
+                # event is the data, frame name is the event type
                 if self.dispatch(http, event, frame_name):
                     return
 
@@ -441,10 +442,14 @@ class ArenaClient:
         that name in their data, so both sources are consulted.
         """
         names = {name for name in (frame_name, event.get("type")) if name}
-
+        
         if "stream_open" in names:
             self.on_stream_open(http, event)
             return False
+
+        # if "fee_rebate" in names:
+        #     self.on_fee_rebate(http, event)
+        #     return True
 
         if "stream_reset" in names:
             self.on_stream_reset(http, event)
